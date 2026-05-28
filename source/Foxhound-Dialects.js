@@ -9,6 +9,7 @@ let getDialects = () =>
 	tmpDialects.MySQL = require('./dialects/MySQL/FoxHound-Dialect-MySQL.js');
 	tmpDialects.MSSQL = require('./dialects/MicrosoftSQL/FoxHound-Dialect-MSSQL.js');
 	tmpDialects.PostgreSQL = require('./dialects/PostgreSQL/FoxHound-Dialect-PostgreSQL.js');
+	tmpDialects.Oracle = require('./dialects/Oracle/FoxHound-Dialect-Oracle.js');
 	tmpDialects.MongoDB = require('./dialects/MongoDB/FoxHound-Dialect-MongoDB.js');
 	tmpDialects.DGraph = require('./dialects/DGraph/FoxHound-Dialect-DGraph.js');
 	tmpDialects.Solr = require('./dialects/Solr/FoxHound-Dialect-Solr.js');
