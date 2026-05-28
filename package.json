@@ -48,7 +48,7 @@
     },
     "homepage": "https://github.com/fable-retold/foxhound",
     "devDependencies": {
-        "pict-docuserve": "^1.4.4",
+        "pict-docuserve": "^1.4.12",
         "quackage": "^1.3.0"
     },
     "dependencies": {
