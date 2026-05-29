@@ -1,6 +1,6 @@
 {
     "name": "foxhound",
-    "version": "2.0.28",
+    "version": "2.0.29",
     "description": "A Database Query generation library.",
     "main": "source/FoxHound.js",
     "scripts": {
