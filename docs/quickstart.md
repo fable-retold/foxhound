@@ -8,7 +8,7 @@ Get up and running with FoxHound in under five minutes.
 npm install foxhound fable
 ```
 
-FoxHound requires [Fable](https://github.com/fable-retold/fable) as a peer dependency for logging, UUID generation, and utility functions.
+FoxHound requires [Fable](https://fable-retold.github.io/fable/) as a peer dependency for logging, UUID generation, and utility functions.
 
 ## Your First Query
 

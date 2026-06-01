@@ -143,4 +143,4 @@ Only these columns are modified:
 
 ## Stricture Integration
 
-Schemas are typically defined using [Stricture](https://github.com/fable-retold/stricture), a companion tool that generates schema definitions from a DDL-like JSON format.  Stricture produces the exact schema array format that FoxHound expects.
+Schemas are typically defined using [Stricture](https://fable-retold.github.io/stricture/), a companion tool that generates schema definitions from a DDL-like JSON format.  Stricture produces the exact schema array format that FoxHound expects.
