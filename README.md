@@ -1,6 +1,6 @@
 # FoxHound
 
-> **[&#9654; Read the Foxhound Documentation](https://fable-retold.github.io/foxhound/)** &mdash; interactive docs with the full API reference.
+> **[Read the Foxhound Documentation](https://fable-retold.github.io/foxhound/)** - interactive docs with the full API reference.
 
 > A fluent query generation DSL for Node.js and the browser
 
