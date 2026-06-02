@@ -4,77 +4,18 @@ FoxHound follows a clean separation between query configuration, dialect-specifi
 
 ## Overview
 
-```mermaid
-graph TD
-    A[Application Code] -->|configure| B[FoxHound Core]
-    B -->|setDialect| C{Dialect Engine}
-    C -->|MySQL| D[MySQL Generator]
-    C -->|PostgreSQL| E[PostgreSQL Generator]
-    C -->|MSSQL| F[MSSQL Generator]
-    C -->|SQLite| G[SQLite Generator]
-    C -->|ALASQL| H[ALASQL Generator]
-    C -->|English| I[English Generator]
-    D --> J[Query Output]
-    E --> J
-    F --> J
-    G --> J
-    H --> J
-    I --> J
-    J -->|query.body| K[SQL String]
-    J -->|query.parameters| L[Bound Values]
-```
+<!-- bespoke diagram: edit diagrams/overview.mmd or .hints.json, then: npx pict-renderer-graph build modules/meadow/foxhound/docs -->
+![Overview](diagrams/overview.svg)
 
 ## Query Lifecycle
 
-```mermaid
-sequenceDiagram
-    participant App as Application
-    participant FH as FoxHound
-    participant D as Dialect
-    participant P as Parameters
-
-    App->>FH: libFoxHound.new(_Fable)
-    FH->>P: Initialize Parameters
-    App->>FH: setScope('Books')
-    App->>FH: addFilter('Genre', 'Sci-Fi')
-    App->>FH: setDialect('MySQL')
-    App->>FH: buildReadQuery()
-    FH->>D: Read(parameters)
-    D->>D: generateFieldList()
-    D->>D: generateWhere()
-    D->>D: generateOrderBy()
-    D->>D: generateLimit()
-    D-->>FH: SQL string
-    FH->>P: Store in query.body
-    App->>FH: query.body
-    FH-->>App: SELECT `Books`.* FROM `Books` WHERE ...
-```
+<!-- bespoke diagram: edit diagrams/query-lifecycle.mmd or .hints.json, then: npx pict-renderer-graph build modules/meadow/foxhound/docs -->
+![Query Lifecycle](diagrams/query-lifecycle.svg)
 
 ## Component Architecture
 
-```mermaid
-graph LR
-    subgraph FoxHound Core
-        A[FoxHound.js] --> B[Parameters.js]
-        A --> C[Foxhound-Dialects.js]
-    end
-
-    subgraph Dialect Modules
-        C --> D[MySQL]
-        C --> E[PostgreSQL]
-        C --> F[MSSQL]
-        C --> G[SQLite]
-        C --> H[ALASQL]
-        C --> I[English]
-        C --> J[MeadowEndpoints]
-    end
-
-    subgraph External
-        K[Fable] --> A
-        L[Meadow] --> A
-        M[Stricture] --> B
-    end
-```
+<!-- bespoke diagram: edit diagrams/component-architecture.mmd or .hints.json, then: npx pict-renderer-graph build modules/meadow/foxhound/docs -->
+![Component Architecture](diagrams/component-architecture.svg)
 
 ## Factory Pattern
 
@@ -175,22 +116,5 @@ FoxHound depends on Fable for:
 
 ## Schema-Aware Generation
 
-```mermaid
-flowchart TD
-    A[Record Object] --> B{Schema Attached?}
-    B -->|No| C[All columns parameterized]
-    B -->|Yes| D[Check each column type]
-    D --> E{AutoIdentity?}
-    E -->|Yes| F[NULL / DEFAULT / Skip]
-    D --> G{CreateDate?}
-    G -->|Yes| H[NOW timestamp]
-    D --> I{Deleted?}
-    I -->|Yes| J[Auto-filter on Read]
-    D --> K{Default?}
-    K -->|Yes| L[Parameterized value]
-    C --> M[Generate SQL]
-    F --> M
-    H --> M
-    J --> M
-    L --> M
-```
+<!-- bespoke diagram: edit diagrams/schema-aware-generation.mmd or .hints.json, then: npx pict-renderer-graph build modules/meadow/foxhound/docs -->
+![Schema-Aware Generation](diagrams/schema-aware-generation.svg)

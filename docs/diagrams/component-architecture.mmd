@@ -1,0 +1,21 @@
+graph LR
+    subgraph FoxHound Core
+        A[FoxHound.js] --> B[Parameters.js]
+        A --> C[Foxhound-Dialects.js]
+    end
+
+    subgraph Dialect Modules
+        C --> D[MySQL]
+        C --> E[PostgreSQL]
+        C --> F[MSSQL]
+        C --> G[SQLite]
+        C --> H[ALASQL]
+        C --> I[English]
+        C --> J[MeadowEndpoints]
+    end
+
+    subgraph External
+        K[Fable] --> A
+        L[Meadow] --> A
+        M[Stricture] --> B
+    end

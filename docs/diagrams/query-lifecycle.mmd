@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant App as Application
+    participant FH as FoxHound
+    participant D as Dialect
+    participant P as Parameters
+
+    App->>FH: libFoxHound.new(_Fable)
+    FH->>P: Initialize Parameters
+    App->>FH: setScope('Books')
+    App->>FH: addFilter('Genre', 'Sci-Fi')
+    App->>FH: setDialect('MySQL')
+    App->>FH: buildReadQuery()
+    FH->>D: Read(parameters)
+    D->>D: generateFieldList()
+    D->>D: generateWhere()
+    D->>D: generateOrderBy()
+    D->>D: generateLimit()
+    D-->>FH: SQL string
+    FH->>P: Store in query.body
+    App->>FH: query.body
+    FH-->>App: SELECT `Books`.* FROM `Books` WHERE ...

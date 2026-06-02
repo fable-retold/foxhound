@@ -1,0 +1,17 @@
+graph TD
+    A[Application Code] -->|configure| B[FoxHound Core]
+    B -->|setDialect| C{Dialect Engine}
+    C -->|MySQL| D[MySQL Generator]
+    C -->|PostgreSQL| E[PostgreSQL Generator]
+    C -->|MSSQL| F[MSSQL Generator]
+    C -->|SQLite| G[SQLite Generator]
+    C -->|ALASQL| H[ALASQL Generator]
+    C -->|English| I[English Generator]
+    D --> J[Query Output]
+    E --> J
+    F --> J
+    G --> J
+    H --> J
+    I --> J
+    J -->|query.body| K[SQL String]
+    J -->|query.parameters| L[Bound Values]

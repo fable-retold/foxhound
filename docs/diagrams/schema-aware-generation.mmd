@@ -1,0 +1,17 @@
+flowchart TD
+    A[Record Object] --> B{Schema Attached?}
+    B -->|No| C[All columns parameterized]
+    B -->|Yes| D[Check each column type]
+    D --> E{AutoIdentity?}
+    E -->|Yes| F[NULL / DEFAULT / Skip]
+    D --> G{CreateDate?}
+    G -->|Yes| H[NOW timestamp]
+    D --> I{Deleted?}
+    I -->|Yes| J[Auto-filter on Read]
+    D --> K{Default?}
+    K -->|Yes| L[Parameterized value]
+    C --> M[Generate SQL]
+    F --> M
+    H --> M
+    J --> M
+    L --> M
