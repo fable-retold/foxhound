@@ -4,9 +4,8 @@ FoxHound builds queries through a two-phase process: **configure** then **build*
 
 ## The Query Lifecycle
 
-```
-Configure  ──►  Build  ──►  Access Results
-```
+<!-- bespoke diagram: edit diagrams/the-query-lifecycle.mmd or .hints.json, then: npx pict-renderer-graph build modules/meadow/foxhound/docs/query -->
+![The Query Lifecycle](diagrams/the-query-lifecycle.svg)
 
 1. **Configure** -- set the scope, fields, filters, sorts, joins, pagination, records, and dialect
 2. **Build** -- call one of the `build*Query()` methods to generate the SQL
