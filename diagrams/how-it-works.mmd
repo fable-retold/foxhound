@@ -1,0 +1,10 @@
+Application Code
+  └── FoxHound Query
+        ├── setScope('Books')         -> target table
+        ├── addFilter('Genre', '...')  -> WHERE clause
+        ├── addSort('Title')          -> ORDER BY clause
+        ├── setCap(25)                -> LIMIT clause
+        ├── setDialect('MySQL')       -> output format
+        └── buildReadQuery()          -> SQL generation
+              ├── query.body          -> SQL string
+              └── query.parameters    -> bound values

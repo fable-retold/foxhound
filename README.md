@@ -54,18 +54,8 @@ npm install foxhound
 
 FoxHound follows a configure-then-build pattern.  You create a query instance, chain configuration methods to set the table, columns, filters, sorts, and dialect, then call a build method to generate the SQL.
 
-```
-Application Code
-  └── FoxHound Query
-        ├── setScope('Books')         -> target table
-        ├── addFilter('Genre', '...')  -> WHERE clause
-        ├── addSort('Title')          -> ORDER BY clause
-        ├── setCap(25)                -> LIMIT clause
-        ├── setDialect('MySQL')       -> output format
-        └── buildReadQuery()          -> SQL generation
-              ├── query.body          -> SQL string
-              └── query.parameters    -> bound values
-```
+<!-- bespoke diagram: edit diagrams/how-it-works.mmd or .hints.json, then: npx pict-renderer-graph build modules/meadow/foxhound -->
+![How It Works](diagrams/how-it-works.svg)
 
 ## Dialects
 
