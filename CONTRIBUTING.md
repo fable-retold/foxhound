@@ -47,4 +47,4 @@ When in doubt, match what the surrounding code does.
 
 ## Repository Structure
 
-Each module is its own git repository. The [retold](https://github.com/stevenvelozo/retold) repository tracks module organization but does not contain module source code. Direct your pull request to the specific module repository where your change belongs.
+Each module is its own git repository. The [retold](https://github.com/fable-retold/retold) repository tracks module organization but does not contain module source code. Direct your pull request to the specific module repository where your change belongs.
