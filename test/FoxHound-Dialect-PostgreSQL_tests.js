@@ -338,5 +338,200 @@ suite
 				);
 			}
 		);
+
+		suite
+		(
+			'Stable Pagination',
+			function()
+			{
+				test
+				(
+					'A capped read with no sort orders by the identity column',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500)
+							.setBegin(1000);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT "Animal".* FROM "Animal" WHERE "Animal"."Deleted" = :Deleted_w0 ORDER BY "IDAnimal" LIMIT 500 OFFSET 1000;');
+					}
+				);
+				test
+				(
+					'A capped read with a caller sort appends the identity column as a tiebreaker',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500)
+							.setSort([{Column:'Name',Direction:'Descending'}]);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT "Animal".* FROM "Animal" WHERE "Animal"."Deleted" = :Deleted_w0 ORDER BY "Name" DESC, "IDAnimal" LIMIT 500;');
+					}
+				);
+				test
+				(
+					'A caller sort already on the identity column is left alone',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500)
+							.setSort([{Column:'IDAnimal',Direction:'Descending'}]);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT "Animal".* FROM "Animal" WHERE "Animal"."Deleted" = :Deleted_w0 ORDER BY "IDAnimal" DESC LIMIT 500;');
+					}
+				);
+				test
+				(
+					'An uncapped read is left unsorted',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal');
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+					}
+				);
+				test
+				(
+					'A DISTINCT read takes no identity sort',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setDistinct(true)
+							.setCap(500)
+							.setDataElements(['Name', 'Age']);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT DISTINCT "Name", "Age" FROM "Animal" WHERE "Animal"."Deleted" = :Deleted_w0 LIMIT 500;');
+					}
+				);
+				test
+				(
+					'A query override takes no identity sort',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.parameters.queryOverride = 'SELECT COUNT(*) FROM "Animal"<%= Where %> GROUP BY "Color"<%= OrderBy %><%= Limit %>;';
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT COUNT(*) FROM "Animal" WHERE "Animal"."Deleted" = :Deleted_w0 GROUP BY "Color" LIMIT 500;');
+					}
+				);
+				test
+				(
+					'disableStableSort opts a capped read out',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.parameters.disableStableSort = true;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+					}
+				);
+				test
+				(
+					'A schema with no identity column leaves the read unsorted',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = [ { Column: 'Name', Type: 'String' }, { Column: 'Age', Type: 'Numeric' } ];
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+					}
+				);
+				test
+				(
+					'A non-AutoIdentity primary key is used when meadow plumbs defaultIdentifier',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('LakeTable')
+							.setCap(500);
+						tmpQuery.query.schema = [ { Column: 'IDLakeTable', Type: 'Numeric' }, { Column: 'Name', Type: 'String' } ];
+						tmpQuery.query.defaultIdentifier = 'IDLakeTable';
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT "LakeTable".* FROM "LakeTable" ORDER BY "IDLakeTable" LIMIT 500;');
+					}
+				);
+				test
+				(
+					'A defaultIdentifier absent from the schema is never emitted',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('LakeTable')
+							.setCap(500);
+						// meadow defaults DefaultIdentifier to 'ID'+Scope, which need not exist.
+						tmpQuery.query.schema = [ { Column: 'Name', Type: 'String' } ];
+						tmpQuery.query.defaultIdentifier = 'IDLakeTable';
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+					}
+				);
+				test
+				(
+					'A joined read qualifies the identity column with the scope',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.parameters.join = [ { Type: 'INNER JOIN', Table: 'Office', From: 'Animal.IDOffice', To: 'Office.IDOffice' } ];
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('ORDER BY "Animal"."IDAnimal"');
+					}
+				);
+				test
+				(
+					'clone carries the identity column forward',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('PostgreSQL')
+							.setScope('LakeTable')
+							.setCap(500);
+						tmpQuery.query.schema = [ { Column: 'IDLakeTable', Type: 'Numeric' } ];
+						tmpQuery.query.defaultIdentifier = 'IDLakeTable';
+
+						var tmpClone = tmpQuery.clone().setDialect('PostgreSQL');
+						tmpClone.buildReadQuery();
+						Expect(tmpClone.query.body).to.contain('ORDER BY "IDLakeTable"');
+					}
+				);
+			}
+		);
 	}
 );

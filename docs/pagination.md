@@ -75,7 +75,44 @@ tmpQuery
 | **SQLite** | `LIMIT 20` | `LIMIT 20 OFFSET 40` |
 | **ALASQL** | `LIMIT 20` | `LIMIT 20 FETCH 40` |
 
-> **Note:** MSSQL's `OFFSET ... FETCH` syntax requires an `ORDER BY` clause.  If you use pagination with MSSQL, be sure to add at least one sort column.
+> **Note:** MSSQL's `OFFSET ... FETCH` syntax requires an `ORDER BY` clause.  Stable pagination supplies one automatically; where no identity column can be resolved the dialect falls back to `ORDER BY (SELECT 1)`.
+
+## Stable Pagination
+
+Paging a query whose sort is not a *total order* has no defined behavior in any SQL engine.  Consecutive pages may overlap, and rows falling between them are never returned.  The total row count still looks right, so the loss is silent — only a caller collecting distinct identifiers notices.
+
+PostgreSQL surfaces this most readily: `synchronize_seqscans` (on by default) lets each page's sequential scan start wherever the previous scan on that relation left off, for any relation larger than `shared_buffers / 4`.  `OFFSET` then counts forward from that arbitrary point.  Measured on a 147k-row table with a 32MB `shared_buffers`, a full paged sweep recovered only 63% of the rows.
+
+FoxHound closes this by making the order total whenever a read is capped.  The identity column is appended to the sort as a final tiebreaker:
+
+```javascript
+// No sort supplied
+tmpQuery.setScope('Book').setCap(500).setBegin(1000);
+// SELECT "Book".* FROM "Book" ORDER BY "IDBook" LIMIT 500 OFFSET 1000;
+
+// Caller sort on a non-unique column — still not a total order on its own
+tmpQuery.setScope('Book').setCap(500).setSort([{Column:'Title',Direction:'Descending'}]);
+// SELECT "Book".* FROM "Book" ORDER BY "Title" DESC, "IDBook" LIMIT 500;
+```
+
+A caller-supplied sort always leads; the identity column only breaks ties, and is omitted when the caller already sorted on it.
+
+The identity column is resolved from the query's schema — an `AutoIdentity` entry first, then `query.defaultIdentifier` (meadow's `DefaultIdentifier`, which covers primary keys that aren't auto-increment) provided the schema confirms the column exists.  When neither resolves, no sort is added.
+
+Nothing is appended when:
+
+- the query has no cap — an unpaged read returns every row regardless of order
+- `distinct` is set — SQL rejects an `ORDER BY` term that isn't in the `SELECT DISTINCT` list
+- a query override is in play — the override owns its own clause placement, and may be grouping
+- `parameters.disableStableSort` is set — the explicit opt-out, for a deliberately cheap unordered scan
+
+```javascript
+tmpQuery.parameters.disableStableSort = true;
+```
+
+All six SQL dialects behave identically here, including the MSSQL and Oracle `legacyPagination` wrappers — the same total order is what `ROW_NUMBER() OVER` and the `ROWNUM` subquery order by.
+
+> **Note:** ordering by the primary key generally moves PostgreSQL to an index scan, which is what defeats syncscan.  A deep `OFFSET` still walks every preceding index entry, so this makes a full sweep *correct*, not fast.  For large sweeps prefer keyset pagination — filter on `IDTable > :last` and cap — which stays O(page).
 
 ## No Cap, No Pagination
 

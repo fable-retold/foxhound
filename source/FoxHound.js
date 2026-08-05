@@ -54,8 +54,9 @@ var FoxHound = function()
 				.setBegin(_Parameters.begin)
 				.setCap(_Parameters.cap);
 
-			// Schema is the only part of a query that carries forward.
+			// Schema and the identity column are the only parts of a query that carry forward.
 			tmpFoxHound.query.schema = _Parameters.query.schema;
+			tmpFoxHound.query.defaultIdentifier = _Parameters.query.defaultIdentifier;
 
 			if (_Parameters.dataElements)
 			{
@@ -93,6 +94,7 @@ var FoxHound = function()
 				disableDeleteTracking: false,
 				body: false,
 				schema: false,   // The schema to intersect with our records
+				defaultIdentifier: false, // The identity column, used to give paged reads a total order
 				IDUser: 0,       // The user to stamp into records
 				UUID: _Fable.getUUID(), // A UUID for this record
 				records: false,  // The records to be created or changed

@@ -282,6 +282,89 @@ var FoxHoundDialectSQLite = function(pFable)
 	};
 
 	/**
+	* Find the column that gives a read a total order.
+	*
+	* An AutoIdentity schema entry is preferred because it is known to exist on
+	* the table.  `defaultIdentifier` is meadow's DefaultIdentifier, which is
+	* correct for primary keys that aren't auto-increment — but it falls back to
+	* 'ID'+Scope when nothing set it, so it is only trusted when the schema
+	* confirms the column is real.
+	*
+	* @method: findIdentityColumn
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {String|null} The column name, or null if none can be resolved
+	*/
+	var findIdentityColumn = function(pParameters)
+	{
+		var tmpQuery = (pParameters.query && typeof(pParameters.query) === 'object') ? pParameters.query : {};
+		var tmpSchema = Array.isArray(tmpQuery.schema) ? tmpQuery.schema : [];
+
+		for (var i = 0; i < tmpSchema.length; i++)
+		{
+			if (tmpSchema[i].Type === 'AutoIdentity')
+			{
+				return tmpSchema[i].Column;
+			}
+		}
+
+		if (typeof(tmpQuery.defaultIdentifier) === 'string' && tmpQuery.defaultIdentifier)
+		{
+			for (var j = 0; j < tmpSchema.length; j++)
+			{
+				if (tmpSchema[j].Column === tmpQuery.defaultIdentifier)
+				{
+					return tmpQuery.defaultIdentifier;
+				}
+			}
+		}
+
+		return null;
+	};
+
+	/**
+	* Resolve the sort a capped read should actually run with.
+	*
+	* LIMIT/OFFSET over a sort that isn't a total order has no defined paging
+	* behavior: pages can overlap and drop rows.  Appending the identity column
+	* makes the order total, so pages partition the result set.  A
+	* caller-supplied sort still leads; the identity column only breaks ties.
+	*
+	* @method: resolveStableSort
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {Array} The sort array to emit
+	*/
+	var resolveStableSort = function(pParameters)
+	{
+		var tmpSort = Array.isArray(pParameters.sort) ? pParameters.sort.slice() : [];
+
+		// Only paged reads need a total order.  DISTINCT rejects an ORDER BY
+		// term that isn't in the select list, and a query override owns its own
+		// clause placement (it may be grouping), so neither can take one.
+		if (!pParameters.cap || pParameters.distinct || pParameters.queryOverride || pParameters.disableStableSort)
+		{
+			return tmpSort;
+		}
+
+		var tmpIdentityColumn = findIdentityColumn(pParameters);
+		if (!tmpIdentityColumn)
+		{
+			return tmpSort;
+		}
+
+		for (var i = 0; i < tmpSort.length; i++)
+		{
+			if (String(tmpSort[i].Column).split('.').pop() === tmpIdentityColumn)
+			{
+				// Already a total order.
+				return tmpSort;
+			}
+		}
+
+		tmpSort.push({ Column: tmpIdentityColumn, Direction: 'Ascending' });
+		return tmpSort;
+	};
+
+	/**
 	* Generate an ORDER BY clause from the sort array
 	*
 	* Each entry in the sort is an object like:
@@ -293,7 +376,7 @@ var FoxHoundDialectSQLite = function(pFable)
 	*/
 	var generateOrderBy = function(pParameters)
 	{
-		var tmpOrderBy = pParameters.sort;
+		var tmpOrderBy = resolveStableSort(pParameters);
 		if (!Array.isArray(tmpOrderBy) || tmpOrderBy.length < 1)
 		{
 			return '';

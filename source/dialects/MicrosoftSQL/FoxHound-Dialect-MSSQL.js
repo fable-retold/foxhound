@@ -398,10 +398,9 @@ var FoxHoundDialectMSSQL = function(pFable)
 	};
 
 	/**
-	* Find the table's AutoIdentity primary-key column from the schema, if any.
-	* Used as a deterministic default ORDER BY when the caller didn't set a
-	* sort — MSSQL pagination (both OFFSET/FETCH and ROW_NUMBER) requires an
-	* ORDER BY clause or it produces a syntax error.
+	* Find the column whose value the database generates on INSERT.
+	*
+	* Ordering asks a different question; see findIdentityColumn.
 	*
 	* @param: {Object} pParameters SQL Query Parameters
 	* @return: {String|null} The column name, or null if none found
@@ -420,17 +419,104 @@ var FoxHoundDialectMSSQL = function(pFable)
 	};
 
 	/**
+	* Find the column that gives a read a total order.
+	*
+	* An AutoIdentity schema entry is preferred because it is known to exist on
+	* the table.  `defaultIdentifier` is meadow's DefaultIdentifier, which is
+	* correct for primary keys that aren't auto-increment — but it falls back to
+	* 'ID'+Scope when nothing set it, so it is only trusted when the schema
+	* confirms the column is real.
+	*
+	* @method: findIdentityColumn
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {String|null} The column name, or null if none can be resolved
+	*/
+	var findIdentityColumn = function(pParameters)
+	{
+		var tmpQuery = (pParameters.query && typeof(pParameters.query) === 'object') ? pParameters.query : {};
+		var tmpSchema = Array.isArray(tmpQuery.schema) ? tmpQuery.schema : [];
+
+		for (var i = 0; i < tmpSchema.length; i++)
+		{
+			if (tmpSchema[i].Type === 'AutoIdentity')
+			{
+				return tmpSchema[i].Column;
+			}
+		}
+
+		if (typeof(tmpQuery.defaultIdentifier) === 'string' && tmpQuery.defaultIdentifier)
+		{
+			for (var j = 0; j < tmpSchema.length; j++)
+			{
+				if (tmpSchema[j].Column === tmpQuery.defaultIdentifier)
+				{
+					return tmpQuery.defaultIdentifier;
+				}
+			}
+		}
+
+		return null;
+	};
+
+	/**
+	* Resolve the sort a capped read should actually run with.
+	*
+	* Paging over a sort that isn't a total order has no defined behavior: pages
+	* can overlap and drop rows.  Appending the identity column makes the order
+	* total, so pages partition the result set.  A caller-supplied sort still
+	* leads; the identity column only breaks ties.
+	*
+	* The ORDER BY clause is emitted unqualified here, so a joined read gets no
+	* scope prefix — an ambiguous-column error is preferable to the silently
+	* wrong `[Animal.IDAnimal]` this dialect's bracket quoting would produce.
+	*
+	* @method: resolveStableSort
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {Array} The sort array to emit
+	*/
+	var resolveStableSort = function(pParameters)
+	{
+		var tmpSort = Array.isArray(pParameters.sort) ? pParameters.sort.slice() : [];
+
+		// Only paged reads need a total order.  DISTINCT rejects an ORDER BY
+		// term that isn't in the select list, and a query override owns its own
+		// clause placement (it may be grouping), so neither can take one.
+		if (!pParameters.cap || pParameters.distinct || pParameters.queryOverride || pParameters.disableStableSort)
+		{
+			return tmpSort;
+		}
+
+		var tmpIdentityColumn = findIdentityColumn(pParameters);
+		if (!tmpIdentityColumn)
+		{
+			return tmpSort;
+		}
+
+		for (var i = 0; i < tmpSort.length; i++)
+		{
+			if (String(tmpSort[i].Column).split('.').pop() === tmpIdentityColumn)
+			{
+				// Already a total order.
+				return tmpSort;
+			}
+		}
+
+		tmpSort.push({ Column: tmpIdentityColumn, Direction: 'Ascending' });
+		return tmpSort;
+	};
+
+	/**
 	* Generate an ORDER BY clause from the sort array
 	*
 	* Each entry in the sort is an object like:
 	* {Column:'Color',Direction:'Descending'}
 	*
-	* When no sort is specified but the query has a cap (pagination is
-	* active), inject a default ORDER BY on the primary key so MSSQL
-	* doesn't reject the OFFSET/FETCH or ROW_NUMBER clause.  Without a
-	* schema the PK can't be inferred — fall back to `ORDER BY (SELECT 1)`
-	* which is legal for OFFSET/FETCH but not for ROW_NUMBER (the legacy
-	* pagination path handles that case by refusing to paginate).
+	* A capped read has the identity column appended as a final tiebreaker so
+	* paging is deterministic.  MSSQL pagination (both OFFSET/FETCH and
+	* ROW_NUMBER) also *requires* an ORDER BY or it is a syntax error, so when
+	* no sort survives resolution we fall back to `ORDER BY (SELECT 1)` — legal
+	* for OFFSET/FETCH but not for ROW_NUMBER (the legacy pagination path
+	* handles that case by refusing to paginate).
 	*
 	* @method: generateOrderBy
 	* @param: {Object} pParameters SQL Query Parameters
@@ -438,16 +524,11 @@ var FoxHoundDialectMSSQL = function(pFable)
 	*/
 	var generateOrderBy = function(pParameters)
 	{
-		var tmpOrderBy = pParameters.sort;
+		var tmpOrderBy = resolveStableSort(pParameters);
 		if (!Array.isArray(tmpOrderBy) || tmpOrderBy.length < 1)
 		{
 			if (pParameters.cap)
 			{
-				var tmpPK = findPrimaryKeyColumn(pParameters);
-				if (tmpPK)
-				{
-					return ' ORDER BY ['+tmpPK+']';
-				}
 				return ' ORDER BY (SELECT 1)';
 			}
 			return '';

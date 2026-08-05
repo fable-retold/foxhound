@@ -245,7 +245,7 @@ suite
 						tmpQuery.parameters.legacyPagination = true;
 						tmpQuery.buildReadQuery();
 						Expect(tmpQuery.query.body)
-							.to.equal('SELECT Name, Age, Cost FROM (SELECT meadow_inner.*, ROWNUM AS "_RowNum" FROM (SELECT Name, Age, Cost FROM Animal WHERE Deleted = :Deleted_w0 ORDER BY Age) meadow_inner WHERE ROWNUM <= 30) WHERE "_RowNum" > 20');
+							.to.equal('SELECT Name, Age, Cost FROM (SELECT meadow_inner.*, ROWNUM AS "_RowNum" FROM (SELECT Name, Age, Cost FROM Animal WHERE Deleted = :Deleted_w0 ORDER BY Age, IDAnimal) meadow_inner WHERE ROWNUM <= 30) WHERE "_RowNum" > 20');
 					}
 				);
 				test
@@ -455,6 +455,152 @@ suite
 						Expect(tmpQuery.query.parameterTypes.Age_w0).to.equal('NUMBER');
 						Expect(tmpQuery.query.parameterTypes.Name_w1).to.equal('STRING');
 						Expect(tmpQuery.query.parameterTypes.Deleted_w2).to.equal('NUMBER');
+					}
+				);
+			}
+		);
+
+		suite
+		(
+			'Stable Pagination',
+			function()
+			{
+				test
+				(
+					'A capped read with no sort orders by the identity column',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(500)
+							.setBegin(1000);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('ORDER BY IDAnimal');
+					}
+				);
+				test
+				(
+					'A capped read with a caller sort appends the identity column as a tiebreaker',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(500)
+							.setSort([{Column:'Name',Direction:'Descending'}]);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('ORDER BY Name DESC, IDAnimal');
+					}
+				);
+				test
+				(
+					'A caller sort already on the identity column is left alone',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(500)
+							.setSort([{Column:'IDAnimal',Direction:'Descending'}]);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('ORDER BY IDAnimal DESC');
+						Expect(tmpQuery.query.body).to.not.contain('IDAnimal DESC, ');
+					}
+				);
+				test
+				(
+					'An uncapped read is left unsorted',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal');
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+					}
+				);
+				test
+				(
+					'A DISTINCT read takes no identity sort',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setDistinct(true)
+							.setCap(500)
+							.setDataElements(['Name', 'Age']);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('IDAnimal');
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+					}
+				);
+				test
+				(
+					'disableStableSort opts a capped read out',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.parameters.disableStableSort = true;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('IDAnimal');
+					}
+				);
+				test
+				(
+					'A non-AutoIdentity primary key is used when meadow plumbs defaultIdentifier',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = [ { Column: 'IDAnimal', Type: 'Numeric' }, { Column: 'Name', Type: 'String' } ];
+						tmpQuery.query.defaultIdentifier = 'IDAnimal';
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('ORDER BY IDAnimal');
+					}
+				);
+				test
+				(
+					'A defaultIdentifier absent from the schema is never emitted',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(500);
+						tmpQuery.query.schema = [ { Column: 'Name', Type: 'String' } ];
+						tmpQuery.query.defaultIdentifier = 'IDAnimal';
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('IDAnimal');
+					}
+				);
+				test
+				(
+					'The legacy pagination wrapper orders by the same total order',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable)
+							.setDialect('Oracle')
+							.setScope('Animal')
+							.setCap(10)
+							.setBegin(20)
+							.setSort([{Column:'Name',Direction:'Ascending'}]);
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.parameters.legacyPagination = true;
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('ORDER BY Name, IDAnimal');
 					}
 				);
 			}

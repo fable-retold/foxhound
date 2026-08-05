@@ -1,6 +1,6 @@
 {
     "name": "foxhound",
-    "version": "2.0.29",
+    "version": "2.0.30",
     "description": "A Database Query generation library.",
     "main": "source/FoxHound.js",
     "scripts": {
@@ -48,11 +48,11 @@
     },
     "homepage": "https://github.com/fable-retold/foxhound",
     "devDependencies": {
-        "pict-docuserve": "^1.4.12",
+        "pict-docuserve": "^1.4.19",
         "quackage": "^1.3.0"
     },
     "dependencies": {
-        "fable": "^3.1.75",
+        "fable": "^3.1.80",
         "typescript": "^5.9.3"
     }
 }

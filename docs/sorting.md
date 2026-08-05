@@ -77,4 +77,4 @@ The `ORDER BY` clause syntax is consistent across all SQL dialects.  The main di
 
 ## Interaction with Pagination
 
-In MSSQL, pagination with `OFFSET ... FETCH` requires an `ORDER BY` clause.  If you set a cap without a sort, you may need to add a sort on the primary key to ensure predictable results.
+A capped read has its identity column appended to the sort as a final tiebreaker, so that paging returns each row exactly once.  Your sort still leads — the identity column only orders rows your sort considers equal.  See [Stable Pagination](pagination.md#stable-pagination) for the mechanism, the cases where nothing is appended, and the `disableStableSort` opt-out.
