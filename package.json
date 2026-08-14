@@ -1,6 +1,6 @@
 {
     "name": "foxhound",
-    "version": "2.0.30",
+    "version": "2.0.31",
     "description": "A Database Query generation library.",
     "main": "source/FoxHound.js",
     "scripts": {
@@ -52,7 +52,7 @@
         "quackage": "^1.3.0"
     },
     "dependencies": {
-        "fable": "^3.1.80",
+        "fable": "^3.1.81",
         "typescript": "^5.9.3"
     }
 }

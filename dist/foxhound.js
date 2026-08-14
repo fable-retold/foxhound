@@ -2882,7 +2882,7 @@
                 tmpNewOperator = 'INN';
                 break;
               case 'NOT IN':
-                tmpNewOperator = 'NI';
+                tmpNewOperator = 'NIN';
                 break;
             }
             return tmpNewOperator;
@@ -2900,12 +2900,18 @@
               // Close a logical grouping
               tmpfAddFilter('FCP', ['0', ')', '0']);
             } else if (tmpFilter[i].Operator === 'IN' || tmpFilter[i].Operator === "NOT IN") {
-              let tmpFilterCommand = 'FBV';
+              // FBL, not FBV: only the list stanzas split their value on
+              // commas at the far end. An FBV carrying "a,b,c" arrives
+              // upstream as the single scalar string "a,b,c", and a numeric
+              // column then coerces it to its leading integer — the whole
+              // list silently collapses to its first element.
+              let tmpFilterCommand = 'FBL';
               if (tmpFilter[i].Connector == 'OR') {
-                tmpFilterCommand = 'FBVOR';
+                tmpFilterCommand = 'FBLOR';
               }
+              let tmpValues = Array.isArray(tmpFilter[i].Value) ? tmpFilter[i].Value : [tmpFilter[i].Value];
               // Add the column name, operator and parameter name to the list of where value parenthetical
-              tmpfAddFilter(tmpFilterCommand, [tmpFilter[i].Column, tmpfTranslateOperator(tmpFilter[i].Operator), tmpFilter[i].Value.map(encodeURIComponent).join(',')]);
+              tmpfAddFilter(tmpFilterCommand, [tmpFilter[i].Column, tmpfTranslateOperator(tmpFilter[i].Operator), tmpValues.map(encodeURIComponent).join(',')]);
             } else if (tmpFilter[i].Operator === 'IS NULL') {
               // IS NULL is a special operator which doesn't require a value, or parameter
               tmpfAddFilter('FBV', [tmpFilter[i].Column, 'IN', '0']);
