@@ -84,6 +84,25 @@ var FoxHoundQueryParameters = (
 			['IndexName1', 'IndexName2'] // A list of index names to hint to the underlying provider, if supported
 		 */
 
+		queryBranches: false,
+		/*
+			A set of alternative join/filter paths to the same records, UNIONed together.
+
+			[
+				{ join: [ {Type,Table,From,To}, ... ], filter: [ ...filter entries... ] },
+				{ join: [ ... ],                       filter: [ ... ] }
+			]
+
+			Each branch inherits the query's scope, data elements, filters and sort, and adds its own
+			joins and filters on top. The dialect emits one derived table per branch UNIONed together,
+			pushing the sort and an (begin+cap) limit into each branch so each can be satisfied from
+			its own index rather than scanning to satisfy the outer ORDER BY.
+
+			Used when a record is reachable for more than one independent reason and a single flat
+			query would have to express that as an OR, which prevents the optimizer from driving
+			the query off any one of them.
+		 */
+
 		// Who is making the query
 		userID: 0,
 

@@ -822,6 +822,105 @@ var FoxHoundDialectMySQL = function()
 
 
 	/**
+	* Compute the row window a single branch must return.
+	*
+	* The outer query pages with (begin, cap); the true top (begin+cap) of the combined set is
+	* always contained in the union of each branch's own top (begin+cap), so that is all any
+	* branch has to produce. Without an outer cap the branches stay unlimited.
+	*
+	* @method: generateBranchWindow
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {Number} Returns the per-branch cap, or 0 for unlimited
+	*/
+	var generateBranchWindow = function(pParameters)
+	{
+		if (!pParameters.cap)
+		{
+			return 0;
+		}
+		var tmpBegin = (pParameters.begin === false) ? 0 : (parseInt(pParameters.begin, 10) || 0);
+		return tmpBegin + parseInt(pParameters.cap, 10);
+	};
+
+	/**
+	* Generate one branch of a branched read: the base query with this branch's joins and filters
+	* layered on, sorted the same way, and limited to the outer window.
+	*
+	* @method: generateBranchSelect
+	* @param: {Object} pParameters SQL Query Parameters
+	* @param: {Object} pBranch The branch definition ({join, filter})
+	* @param: {Number} pBranchIndex Ordinal of this branch, used to namespace its parameters
+	* @return: {String} Returns a parenthesized SELECT statement
+	*/
+	var generateBranchSelect = function(pParameters, pBranch, pBranchIndex)
+	{
+		var tmpFilter = Array.isArray(pParameters.filter) ? pParameters.filter.slice() : [];
+		if (Array.isArray(pBranch.filter))
+		{
+			for (var i = 0; i < pBranch.filter.length; i++)
+			{
+				var tmpEntry = pBranch.filter[i];
+				// Branch filter parameters are namespaced by branch ordinal. generateWhere names
+				// parameters `<Parameter>_w<offset>`, so two branches filtering the same column at
+				// the same offset would collide and the second value would overwrite the first.
+				tmpFilter.push(Object.assign({}, tmpEntry,
+					{ Parameter: 'b' + pBranchIndex + '_' + (tmpEntry.Parameter || tmpEntry.Column) }));
+			}
+		}
+
+		var tmpJoin = Array.isArray(pParameters.join) ? pParameters.join.slice() : [];
+		if (Array.isArray(pBranch.join))
+		{
+			tmpJoin = tmpJoin.concat(pBranch.join);
+		}
+
+		var tmpBranchParameters = Object.assign({}, pParameters,
+			{
+				filter: tmpFilter,
+				join: tmpJoin,
+				queryBranches: false,
+				begin: 0,
+				cap: generateBranchWindow(pParameters)
+			});
+
+		var tmpOptDistinct = pParameters.distinct ? ' DISTINCT' : '';
+
+		return '(SELECT' + tmpOptDistinct + generateFieldList(tmpBranchParameters) +
+			' FROM' + generateTableName(tmpBranchParameters) + generateIndexHints(tmpBranchParameters) +
+			generateJoins(tmpBranchParameters) + generateWhere(tmpBranchParameters) +
+			generateOrderBy(tmpBranchParameters) + generateLimit(tmpBranchParameters) + ')';
+	};
+
+	/**
+	* Read records reachable by more than one independent path.
+	*
+	* Each branch becomes its own SELECT, UNIONed into a derived table aliased back to the scope so
+	* the caller's field list and sort still resolve. Expressing the same thing as a flat OR lets
+	* the optimizer drive off none of the paths; this way each branch is satisfied from its own
+	* index and stops at the outer window.
+	*
+	* @method: ReadWithBranches
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {String} Returns the query
+	*/
+	var ReadWithBranches = function(pParameters)
+	{
+		var tmpBranches = pParameters.queryBranches;
+		var tmpSelects = [];
+		for (var i = 0; i < tmpBranches.length; i++)
+		{
+			tmpSelects.push(generateBranchSelect(pParameters, tmpBranches[i], i));
+		}
+
+		var tmpOuterParameters = Object.assign({}, pParameters, { queryBranches: false });
+		var tmpOptDistinct = pParameters.distinct ? ' DISTINCT' : '';
+
+		return 'SELECT' + tmpOptDistinct + generateFieldList(tmpOuterParameters) +
+			' FROM (' + tmpSelects.join(' UNION ') + ') AS' + generateTableName(tmpOuterParameters) +
+			generateOrderBy(tmpOuterParameters) + generateLimit(tmpOuterParameters) + ';';
+	};
+
+	/**
 	* Read one or many records
 	*
 	* Some examples:
@@ -837,6 +936,14 @@ var FoxHoundDialectMySQL = function()
 	*/
 	var Read = function(pParameters)
 	{
+		// Dispatch before the base generators run: generateWhere mutates pParameters.filter by
+		// appending the schema's Deleted clause, and each branch has to start from the caller's
+		// filters rather than from an already-decorated copy.
+		if (Array.isArray(pParameters.queryBranches) && (pParameters.queryBranches.length > 0) && !pParameters.queryOverride)
+		{
+			return ReadWithBranches(pParameters);
+		}
+
 		var tmpFieldList = generateFieldList(pParameters);
 		var tmpTableName = generateTableName(pParameters);
 		var tmpWhere = generateWhere(pParameters);
