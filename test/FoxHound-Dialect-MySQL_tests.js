@@ -1111,5 +1111,139 @@ suite
 				);
 			}
 		);
+
+		suite
+		(
+			'Query Branches',
+			function()
+			{
+				test
+				(
+					'No branches emits the same SQL as before',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal')
+							.addFilter('IDOwner', 12);
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body)
+							.to.equal('SELECT `Animal`.* FROM `Animal` WHERE IDOwner = :IDOwner_w0;');
+					}
+				);
+
+				test
+				(
+					'An invalid or empty branch is ignored',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal')
+							.addQueryBranch('nope')
+							.addQueryBranch({})
+							.addQueryBranch({join: [], filter: []});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.equal('SELECT `Animal`.* FROM `Animal`;');
+					}
+				);
+
+				test
+				(
+					'Branches become UNIONed derived tables aliased back to the scope',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal')
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.equal(
+							'SELECT `Animal`.* FROM ('
+							+ '(SELECT `Animal`.* FROM `Animal` INNER JOIN Owner ON Owner.IDAnimal = Animal.IDAnimal)'
+							+ ' UNION '
+							+ '(SELECT `Animal`.* FROM `Animal` INNER JOIN Keeper ON Keeper.IDAnimal = Animal.IDAnimal)'
+							+ ') AS `Animal`;');
+					}
+				);
+
+				test
+				(
+					'The outer window is pushed into every branch so each can stop early',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal')
+							.setSort([{Column: 'Animal.Name', Direction: 'Descending'}])
+							.setBegin(5000).setCap(100)
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+						tmpQuery.query.schema = _AnimalSchema;
+
+						tmpQuery.buildReadQuery();
+						// each branch takes its own top (begin + cap); the outer statement pages within the union
+						Expect(tmpQuery.query.body).to.contain('INNER JOIN Owner ON Owner.IDAnimal = Animal.IDAnimal');
+						Expect(tmpQuery.query.body).to.contain('INNER JOIN Keeper ON Keeper.IDAnimal = Animal.IDAnimal');
+						// both branches carry the same sort and the same (begin + cap) window
+						Expect(tmpQuery.query.body.split('ORDER BY Animal.Name DESC, Animal.IDAnimal LIMIT 0, 5100)').length - 1).to.equal(2);
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY Animal.Name DESC, IDAnimal LIMIT 5000, 100;');
+					}
+				);
+
+				test
+				(
+					'Branch filters are namespaced so two branches cannot collide',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal')
+							.addQueryBranch({filter: [{Column: 'Animal.IDOwner', Operator: '=', Value: 7, Connector: 'AND', Parameter: 'IDUser'}]})
+							.addQueryBranch({filter: [{Column: 'Animal.IDKeeper', Operator: '=', Value: 9, Connector: 'AND', Parameter: 'IDUser'}]});
+
+						tmpQuery.buildReadQuery();
+						// Same Parameter name at the same offset in both branches; without namespacing the
+						// second value would overwrite the first and both branches would filter on 9.
+						Expect(tmpQuery.query.parameters.b0_IDUser_w0).to.equal(7);
+						Expect(tmpQuery.query.parameters.b1_IDUser_w0).to.equal(9);
+					}
+				);
+
+				test
+				(
+					'Delete tracking is applied once per branch, not once per branch plus once for the base',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal');
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						var tmpDeletedClauses = tmpQuery.query.body.split('`Animal`.Deleted =').length - 1;
+						Expect(tmpDeletedClauses).to.equal(2);
+					}
+				);
+
+				test
+				(
+					'A restricted field list is widened with the sort columns, scope-qualified',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(_Fable).setDialect('MySQL').setScope('Animal')
+							.setDataElements(['Animal.Name'])
+							.setSort([{Column: 'Animal.Cost', Direction: 'Descending'}])
+							.setBegin(0).setCap(10)
+							// this join carries its own IDAnimal, so an unqualified stable sort column
+							// in the select list would be ambiguous
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+						tmpQuery.query.schema = _AnimalSchema;
+
+						tmpQuery.buildReadQuery();
+						// branches carry the sort columns so the outer ORDER BY resolves against the union
+						Expect(tmpQuery.query.body).to.contain('SELECT `Animal`.`Name`, `Animal`.`Cost`, `Animal`.`IDAnimal` FROM `Animal` INNER JOIN Owner');
+						// the caller still gets only what they asked for
+						Expect(tmpQuery.query.body.indexOf('SELECT `Animal`.`Name` FROM (')).to.equal(0);
+					}
+				);
+
+			}
+		);
 	}
 );

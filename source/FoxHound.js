@@ -324,6 +324,58 @@ var FoxHound = function()
 
 
 		/**
+		* Add an alternative join/filter path to the same records.
+		*
+		* A record is included when it satisfies the base query AND any one branch. Each branch
+		* inherits the scope, data elements, filters and sort, and layers its own joins and filters
+		* on top; the dialect emits them as UNIONed derived tables with the sort and limit pushed
+		* into each, so every branch can be driven from its own index.
+		*
+		* With no branches added the emitted SQL is unchanged.
+		*
+		* @method addQueryBranch
+		* @param {Object} pBranch The branch, {join: [...], filter: [...]}; both optional.
+		* @return {Object} Returns the current Query for chaining.
+		*/
+		var addQueryBranch = function(pBranch)
+		{
+			if ((typeof(pBranch) !== 'object') || (pBranch === null) || Array.isArray(pBranch))
+			{
+				_Fable.log.warn('Tried to add an invalid query branch', {queryUUID:_UUID, parameters:_Parameters});
+				return this;
+			}
+
+			var tmpBranch = (
+				{
+					join: Array.isArray(pBranch.join) ? pBranch.join : [],
+					filter: Array.isArray(pBranch.filter) ? pBranch.filter : []
+				});
+
+			if ((tmpBranch.join.length < 1) && (tmpBranch.filter.length < 1))
+			{
+				_Fable.log.warn('Tried to add an empty query branch', {queryUUID:_UUID, parameters:_Parameters});
+				return this;
+			}
+
+			if (!Array.isArray(_Parameters.queryBranches))
+			{
+				_Parameters.queryBranches = [tmpBranch];
+			}
+			else
+			{
+				_Parameters.queryBranches.push(tmpBranch);
+			}
+
+			if (_LogLevel > 2)
+			{
+				_Fable.log.info('Added a query branch', {queryUUID:_UUID, parameters:_Parameters});
+			}
+
+			return this;
+		};
+
+
+		/**
 		* Add a sort data element
 		*
 		* The passed values can be either a string, an object or an array of objects.
@@ -835,6 +887,7 @@ var FoxHound = function()
 			addSort: addSort,
 			setJoin: setJoin,
 			addJoin: addJoin,
+			addQueryBranch: addQueryBranch,
 
 			addRecord: addRecord,
 			setDisableAutoIdentity: setDisableAutoIdentity,
@@ -874,6 +927,19 @@ var FoxHound = function()
 		 * @property query
 		 * @type Object
 		 */
+		/**
+		 * Query Branches
+		 *
+		 * @property queryBranches
+		 * @type Array
+		 */
+		Object.defineProperty(tmpNewFoxHoundObject, 'queryBranches',
+			{
+				get: function() { return _Parameters.queryBranches; },
+				set: function(pBranches) { _Parameters.queryBranches = pBranches; },
+				enumerable: true,
+			});
+
 		Object.defineProperty(tmpNewFoxHoundObject, 'indexHints',
 			{
 				get: function() { return _Parameters.indexHints; },
