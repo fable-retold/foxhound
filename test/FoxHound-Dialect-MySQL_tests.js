@@ -1067,6 +1067,46 @@ suite
 
 				test
 				(
+					'A count over a branched read counts the union, not the whole table',
+					function()
+					{
+						// Counting without the branches reports the size of the table rather than
+						// the size of what the caller may see -- a silently wrong number, and a
+						// disclosure of how much exists beyond their reach.
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal');
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.query.defaultIdentifier = 'IDAnimal';
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}], filter: [{Column: 'Owner.IDPerson', Operator: '=', Value: 7, Connector: 'AND', Parameter: 'IDPerson'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}], filter: [{Column: 'Keeper.IDPerson', Operator: '=', Value: 9, Connector: 'AND', Parameter: 'IDPerson'}]});
+
+						tmpQuery.buildCountQuery();
+						Expect(tmpQuery.query.body.indexOf('SELECT COUNT(*) AS RowCount FROM (')).to.equal(0);
+						Expect(tmpQuery.query.body).to.contain('UNION');
+						// both branch filters survive into the count
+						Expect(tmpQuery.query.body).to.contain('Owner.IDPerson');
+						Expect(tmpQuery.query.body).to.contain('Keeper.IDPerson');
+						// the identity column is scope-qualified; a branch join carries the same name
+						Expect(tmpQuery.query.body).to.contain('SELECT `Animal`.`IDAnimal` FROM `Animal` INNER JOIN Owner');
+						// a count describes the whole matching set, so no per-branch window
+						Expect(tmpQuery.query.body).to.not.contain('LIMIT');
+					}
+				);
+
+				test
+				(
+					'An unbranched count is unchanged',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal');
+						tmpQuery.query.schema = _AnimalSchema;
+						tmpQuery.buildCountQuery();
+						Expect(tmpQuery.query.body).to.not.contain('UNION');
+						Expect(tmpQuery.query.body).to.contain('SELECT COUNT(');
+					}
+				);
+
+				test
+				(
 					'A sort column outside the field list is carried by each branch so the outer sort resolves',
 					function()
 					{

@@ -828,6 +828,14 @@ var FoxHound = function()
 		var buildReadQuery = function()
 		{
 			checkDialect();
+			// A dialect that cannot express branches would return the base query with the branch
+			// joins and filters absent. Because a branch is frequently the only thing restricting
+			// which rows the caller may see, silently dropping one turns a scoped read into an
+			// unscoped one -- so this fails rather than answering with too much.
+			if (Array.isArray(_Parameters.queryBranches) && (_Parameters.queryBranches.length > 0) && !_Dialect.supportsQueryBranches)
+			{
+				throw new Error('FoxHound: the ' + _Dialect.name + ' dialect cannot express query branches; refusing to build a read that would drop them.');
+			}
 			_Parameters.query.body = _Dialect.Read(_Parameters);
 			return this;
 		};

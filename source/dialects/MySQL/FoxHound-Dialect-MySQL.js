@@ -1117,8 +1117,55 @@ var FoxHoundDialectMySQL = function()
 		}
 	};
 
+	/**
+	* Count the records reachable by any branch.
+	*
+	* Counted over the UNION of the branches rather than over the base table: a branch usually
+	* carries the only clause restricting which rows the caller may see, so counting without them
+	* reports the size of the whole table. UNION rather than UNION ALL because a record reachable by
+	* two branches is still one record.
+	*
+	* The per-branch window is deliberately not applied -- a count describes the whole matching set,
+	* not the page a reader would be handed.
+	*
+	* @method: CountWithBranches
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {String} Returns the query
+	*/
+	var CountWithBranches = function(pParameters)
+	{
+		var tmpBranches = pParameters.queryBranches;
+		var tmpIdentifier = pParameters.query && pParameters.query.defaultIdentifier;
+		var tmpScope = generateTableName(pParameters);
+		// Qualified with the scope: a branch join routinely carries a column of the same name as
+		// the identity column, which makes a bare name ambiguous in the select list.
+		var tmpQualified = (tmpIdentifier && typeof(pParameters.scope) === 'string') ? (pParameters.scope + '.' + tmpIdentifier) : tmpIdentifier;
+		var tmpSelects = [];
+		for (var i = 0; i < tmpBranches.length; i++)
+		{
+			var tmpBranchParameters = Object.assign({}, pParameters,
+				{
+					dataElements: tmpQualified ? [ tmpQualified ] : false,
+					queryBranches: false,
+					sort: false,
+					begin: false,
+					cap: false,
+					distinct: false
+				});
+			tmpSelects.push(generateBranchSelect(tmpBranchParameters, tmpBranches[i], i));
+		}
+		return 'SELECT COUNT(*) AS RowCount FROM (' + tmpSelects.join(' UNION ') + ') AS' + tmpScope + ';';
+	};
+
 	var Count = function(pParameters)
 	{
+		// Dispatch before the base generators run, for the same reason Read does: generateWhere
+		// mutates the filter list, and each branch has to start from the caller's filters.
+		if (Array.isArray(pParameters.queryBranches) && (pParameters.queryBranches.length > 0) && !pParameters.queryOverride)
+		{
+			return CountWithBranches(pParameters);
+		}
+
 		var tmpFieldList = pParameters.distinct ? generateFieldList(pParameters, true) : '*';
 		var tmpTableName = generateTableName(pParameters);
 		var tmpJoin = generateJoins(pParameters);
@@ -1167,6 +1214,22 @@ var FoxHoundDialectMySQL = function()
 	Object.defineProperty(tmpDialect, 'name',
 		{
 			get: function() { return 'MySQL'; },
+			enumerable: true
+		});
+
+	/**
+	* Whether this dialect can express a branched read.
+	*
+	* Declared so the query builder can refuse a branched read on a dialect that would quietly
+	* discard the branches. Branches often carry the only clause restricting which rows a caller may
+	* see, so dropping them widens a result set rather than narrowing it.
+	*
+	* @property supportsQueryBranches
+	* @type boolean
+	*/
+	Object.defineProperty(tmpDialect, 'supportsQueryBranches',
+		{
+			get: function() { return true; },
 			enumerable: true
 		});
 

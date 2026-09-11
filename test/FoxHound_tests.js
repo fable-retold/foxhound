@@ -411,6 +411,32 @@ suite
 							.to.equal(3);
 					}
 				);
+
+				test
+				(
+					'A branched read is refused by a dialect that cannot express branches',
+					function()
+					{
+						// A branch is often the only clause restricting which rows the caller may
+						// see. A dialect with no branch support would return the base query with
+						// the branch joins and filters missing -- a wider result set, not an error
+						// -- so building one has to fail instead.
+						var tmpQuery = libFoxHound.new(libFable).setDialect('ALASQL').setScope('Animal')
+							.addQueryBranch({ filter: [{ Column: 'Animal.IDOwner', Operator: '=', Value: 7, Connector: 'AND', Parameter: 'IDOwner' }] });
+						Expect(function() { tmpQuery.buildReadQuery(); }).to.throw(/cannot express query branches/);
+					}
+				);
+
+				test
+				(
+					'An unbranched read on such a dialect is untouched',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('ALASQL').setScope('Animal');
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.equal('SELECT * FROM Animal;');
+					}
+				);
 			}
 		);
 	}
