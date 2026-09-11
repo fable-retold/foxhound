@@ -1064,6 +1064,66 @@ suite
 						Expect(tmpDeletedClauses).to.equal(2);
 					}
 				);
+
+				test
+				(
+					'A sort column outside the field list is carried by each branch so the outer sort resolves',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.setDataElements(['IDSpecies'])
+							.setSort([{Column: 'DateObserved', Direction: 'Descending'}])
+							.setCap(250);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						// Scope-qualified, because a branch join can carry a column of the same name.
+						Expect(tmpQuery.query.body).to.contain('SELECT `IDSpecies`, `Animal`.`DateObserved` FROM `Animal` INNER JOIN Owner');
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY DateObserved DESC LIMIT 250;');
+					}
+				);
+
+				test
+				(
+					'A DISTINCT read drops a sort it cannot honor rather than widening the projection',
+					function()
+					{
+						// Widening would change the question -- distinct over (IDSpecies, DateObserved)
+						// is not distinct over IDSpecies -- and the derived table cannot expose a column
+						// the branches did not select, so the sort goes instead of the answer changing.
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.setDataElements(['IDSpecies']).setDistinct(true)
+							.setSort([{Column: 'DateObserved', Direction: 'Descending'}])
+							.setCap(250);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('DateObserved');
+						Expect(tmpQuery.query.body).to.contain('SELECT DISTINCT `IDSpecies` FROM ((SELECT DISTINCT `IDSpecies` FROM `Animal`');
+						// The window still applies per branch and again on the outside.
+						Expect(tmpQuery.query.body).to.contain('LIMIT 0, 250)');
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` LIMIT 250;');
+					}
+				);
+
+				test
+				(
+					'A DISTINCT read keeps a sort on a column it does project',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.setDataElements(['DateObserved']).setDistinct(true)
+							.setSort([{Column: 'DateObserved', Direction: 'Descending'}])
+							.setCap(250);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY DateObserved DESC LIMIT 250;');
+					}
+				);
 			}
 		);
 	}

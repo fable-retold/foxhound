@@ -843,6 +843,96 @@ var FoxHoundDialectMySQL = function()
 	};
 
 	/**
+	* The sort columns a branched read can actually order by.
+	*
+	* A DISTINCT read projects a narrower set of columns than the table, and the UNION is wrapped in
+	* a derived table that exposes only what the branches selected. Widening the branch select to
+	* carry a sort column would change what DISTINCT means -- distinct over (IDSpecies, DateObserved)
+	* is a different question from distinct over IDSpecies -- so for a DISTINCT read the sort is
+	* narrowed to columns that are already projected, and any other sort column is dropped rather
+	* than silently altering the result set.
+	*
+	* @method: generateBranchSort
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {Array} Returns the sort entries the branched read can honor
+	*/
+	var generateBranchSort = function(pParameters)
+	{
+		var tmpSort = pParameters.sort;
+		if (!Array.isArray(tmpSort) || tmpSort.length < 1 || !pParameters.distinct)
+		{
+			return tmpSort;
+		}
+
+		var tmpDataElements = Array.isArray(pParameters.dataElements) ? pParameters.dataElements : [];
+		var tmpSortable = [];
+		for (var i = 0; i < tmpSort.length; i++)
+		{
+			var tmpSortColumn = String(tmpSort[i].Column).split('.').pop();
+			for (var j = 0; j < tmpDataElements.length; j++)
+			{
+				var tmpEntry = Array.isArray(tmpDataElements[j]) ? (tmpDataElements[j][1] || tmpDataElements[j][0]) : tmpDataElements[j];
+				if (String(tmpEntry).split('.').pop() === tmpSortColumn)
+				{
+					tmpSortable.push(tmpSort[i]);
+					break;
+				}
+			}
+		}
+		return tmpSortable;
+	};
+
+	/**
+	* The columns a branch should select.
+	*
+	* The UNION is wrapped in a derived table, so the outer ORDER BY can only name columns the
+	* branches projected. Where the caller sorts by something outside its own field list, the branch
+	* selects it too. A DISTINCT read is left alone -- see generateBranchSort.
+	*
+	* @method: generateBranchDataElements
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {Array} Returns the data elements a branch should select
+	*/
+	var generateBranchDataElements = function(pParameters)
+	{
+		var tmpDataElements = pParameters.dataElements;
+		if (!Array.isArray(tmpDataElements) || tmpDataElements.length < 1 || pParameters.distinct)
+		{
+			return tmpDataElements;
+		}
+
+		var tmpElements = tmpDataElements.slice();
+		var tmpSort = Array.isArray(pParameters.sort) ? pParameters.sort : [];
+		for (var i = 0; i < tmpSort.length; i++)
+		{
+			var tmpSortColumn = String(tmpSort[i].Column).split('.').pop();
+			var tmpPresent = false;
+			for (var j = 0; j < tmpElements.length; j++)
+			{
+				var tmpEntry = Array.isArray(tmpElements[j]) ? (tmpElements[j][1] || tmpElements[j][0]) : tmpElements[j];
+				if (String(tmpEntry).split('.').pop() === tmpSortColumn)
+				{
+					tmpPresent = true;
+					break;
+				}
+			}
+			if (!tmpPresent)
+			{
+				// Qualify with the scope: a branch join can bring in a column of the same name,
+				// which would make a bare name ambiguous in the select list.
+				var tmpColumn = tmpSort[i].Column;
+				if ((String(tmpColumn).indexOf('.') < 0) && (typeof(pParameters.scope) === 'string') &&
+					(pParameters.scope.indexOf('.') < 0) && (pParameters.scope.indexOf('`') < 0))
+				{
+					tmpColumn = pParameters.scope + '.' + tmpColumn;
+				}
+				tmpElements.push(tmpColumn);
+			}
+		}
+		return tmpElements;
+	};
+
+	/**
 	* Generate one branch of a branched read: the base query with this branch's joins and filters
 	* layered on, sorted the same way, and limited to the outer window.
 	*
@@ -879,6 +969,8 @@ var FoxHoundDialectMySQL = function()
 				filter: tmpFilter,
 				join: tmpJoin,
 				queryBranches: false,
+				dataElements: generateBranchDataElements(pParameters),
+				sort: generateBranchSort(pParameters),
 				begin: 0,
 				cap: generateBranchWindow(pParameters)
 			});
@@ -912,7 +1004,7 @@ var FoxHoundDialectMySQL = function()
 			tmpSelects.push(generateBranchSelect(pParameters, tmpBranches[i], i));
 		}
 
-		var tmpOuterParameters = Object.assign({}, pParameters, { queryBranches: false });
+		var tmpOuterParameters = Object.assign({}, pParameters, { queryBranches: false, sort: generateBranchSort(pParameters) });
 		var tmpOptDistinct = pParameters.distinct ? ' DISTINCT' : '';
 
 		return 'SELECT' + tmpOptDistinct + generateFieldList(tmpOuterParameters) +
