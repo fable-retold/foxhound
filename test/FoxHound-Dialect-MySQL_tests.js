@@ -1164,6 +1164,197 @@ suite
 						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY DateObserved DESC LIMIT 250;');
 					}
 				);
+
+				test
+				(
+					'A sort on a joined table is carried out of each branch under an alias so the outer sort resolves',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.addJoin('Species', 'Species.IDSpecies', 'Animal.IDSpecies')
+							.setSort([{Column: 'Species.Name', Direction: 'Descending'}])
+							.setCap(25);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('(SELECT `Animal`.*, `Species`.`Name` AS `BranchSort_0` FROM `Animal` INNER JOIN Species ON Species.IDSpecies = Animal.IDSpecies INNER JOIN Owner');
+						// Inside each branch the joined table is present, so the branch sorts by the column itself.
+						Expect(tmpQuery.query.body).to.contain('ORDER BY Species.Name DESC LIMIT 0, 25)');
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY BranchSort_0 DESC LIMIT 25;');
+						Expect(tmpQuery.query.body).to.not.contain(') AS `Animal` ORDER BY Species.Name');
+					}
+				);
+
+				test
+				(
+					'A joined sort alongside a field list is aliased, and the outer select keeps only the field list',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.setDataElements(['IDAnimal', 'Name'])
+							.addJoin('Species', 'Species.IDSpecies', 'Animal.IDSpecies')
+							.setSort([{Column: 'Species.Name', Direction: 'Ascending'}])
+							.setCap(25);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						// Appended bare, the joined Name would collide with the scope's Name in the derived table.
+						Expect(tmpQuery.query.body).to.contain('(SELECT `IDAnimal`, `Name`, `Species`.`Name` AS `BranchSort_0` FROM `Animal`');
+						Expect(tmpQuery.query.body).to.match(/^SELECT `IDAnimal`, `Name` FROM \(\(/);
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY BranchSort_0 LIMIT 25;');
+					}
+				);
+
+				test
+				(
+					'A mixed sort aliases only the joined column and keeps its position',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.addJoin('Species', 'Species.IDSpecies', 'Animal.IDSpecies')
+							.setSort([{Column: 'Animal.DateObserved', Direction: 'Descending'}, {Column: 'Species.Name', Direction: 'Ascending'}])
+							.setCap(25);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('(SELECT `Animal`.*, `Species`.`Name` AS `BranchSort_1` FROM `Animal`');
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY Animal.DateObserved DESC, BranchSort_1 LIMIT 25;');
+					}
+				);
+
+				test
+				(
+					'A DISTINCT read drops a joined sort even when the scope projects a column of the same name',
+					function()
+					{
+						var tmpQuery = libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+							.setDataElements(['Name']).setDistinct(true)
+							.addJoin('Species', 'Species.IDSpecies', 'Animal.IDSpecies')
+							.setSort([{Column: 'Species.Name', Direction: 'Descending'}])
+							.setCap(25);
+						tmpQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+							.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` LIMIT 25;');
+					}
+				);
+
+				// Joined-sort edge cases. Shared helpers keep each case to what it varies.
+				var joinedSortRead = function()
+				{
+					return libFoxHound.new(libFable).setDialect('MySQL').setScope('Animal')
+						.addJoin('Species', 'Species.IDSpecies', 'Animal.IDSpecies');
+				};
+				var withTwoBranches = function(pQuery)
+				{
+					return pQuery.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Owner', From: 'Owner.IDAnimal', To: 'Animal.IDAnimal'}]})
+						.addQueryBranch({join: [{Type: 'INNER JOIN', Table: 'Keeper', From: 'Keeper.IDAnimal', To: 'Animal.IDAnimal'}]});
+				};
+
+				test
+				(
+					'Each joined sort column gets its own alias, in sort order',
+					function()
+					{
+						var tmpQuery = withTwoBranches(joinedSortRead()
+							.setSort([{Column: 'Species.Name', Direction: 'Descending'}, {Column: 'Species.IDSpecies', Direction: 'Descending'}])
+							.setCap(25));
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.contain('`Species`.`Name` AS `BranchSort_0`, `Species`.`IDSpecies` AS `BranchSort_1` FROM');
+						Expect(tmpQuery.query.body).to.contain(') AS `Animal` ORDER BY BranchSort_0 DESC, BranchSort_1 DESC LIMIT 25;');
+					}
+				);
+
+				test
+				(
+					'A joined sort still pushes the outer window into every branch',
+					function()
+					{
+						var tmpQuery = withTwoBranches(joinedSortRead()
+							.setSort([{Column: 'Species.Name', Direction: 'Descending'}])
+							.setBegin(50).setCap(25));
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body.match(/ORDER BY Species\.Name DESC LIMIT 0, 75\)/g)).to.have.lengthOf(2);
+						Expect(tmpQuery.query.body).to.match(/\) AS `Animal` ORDER BY BranchSort_0 DESC LIMIT 50, 25;$/);
+					}
+				);
+
+				test
+				(
+					'An unbranched read with a joined sort is unchanged',
+					function()
+					{
+						var tmpQuery = joinedSortRead().setSort([{Column: 'Species.Name', Direction: 'Descending'}]).setCap(25);
+
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.equal('SELECT `Animal`.* FROM `Animal` INNER JOIN Species ON Species.IDSpecies = Animal.IDSpecies ORDER BY Species.Name DESC LIMIT 25;');
+					}
+				);
+
+				test
+				(
+					'A branched count ignores a joined sort and unions only the identity',
+					function()
+					{
+						var tmpQuery = withTwoBranches(joinedSortRead().setSort([{Column: 'Species.Name', Direction: 'Descending'}]));
+						tmpQuery.query.defaultIdentifier = 'IDAnimal';
+
+						tmpQuery.buildCountQuery();
+						Expect(tmpQuery.query.body).to.not.contain('BranchSort');
+						Expect(tmpQuery.query.body).to.not.contain('ORDER BY');
+						Expect(tmpQuery.query.body.split('(SELECT `Animal`.`IDAnimal` FROM')).to.have.lengthOf(3);
+					}
+				);
+
+				test
+				(
+					'Backtick quoting does not hide a joined sort column, nor turn the scope into a joined table',
+					function()
+					{
+						var tmpJoined = withTwoBranches(joinedSortRead().setSort([{Column: '`Species`.`Name`', Direction: 'Descending'}]).setCap(5));
+						tmpJoined.buildReadQuery();
+						Expect(tmpJoined.query.body).to.contain('`Species`.`Name` AS `BranchSort_0`');
+						Expect(tmpJoined.query.body).to.contain(') AS `Animal` ORDER BY BranchSort_0 DESC LIMIT 5;');
+
+						var tmpOwn = withTwoBranches(joinedSortRead().setSort([{Column: '`Animal`.Name', Direction: 'Descending'}]).setCap(5));
+						tmpOwn.buildReadQuery();
+						Expect(tmpOwn.query.body).to.not.contain('BranchSort');
+						Expect(tmpOwn.query.body).to.contain(') AS `Animal` ORDER BY `Animal`.Name DESC LIMIT 5;');
+					}
+				);
+
+				// Known gaps, kept as pending cases until the branched-read design is revisited.
+				test.skip
+				(
+					'A sort on a table that only some branches join is not referenced by the branches without it',
+					function()
+					{
+						// Today every branch aliases Owner.Name, and the Keeper branch has no Owner table to read it from.
+						var tmpQuery = withTwoBranches(joinedSortRead().setSort([{Column: 'Owner.Name', Direction: 'Descending'}]).setCap(5));
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.match(/INNER JOIN Keeper[^)]*`Owner`\.`Name`/);
+					}
+				);
+
+				test.skip
+				(
+					'A field list naming a joined column is readable from the outer query',
+					function()
+					{
+						// Today the outer select names `Species`.`Name`, but the derived table is aliased `Animal`.
+						var tmpQuery = withTwoBranches(joinedSortRead().setDataElements(['IDAnimal', 'Species.Name'])
+							.setSort([{Column: 'Species.Name', Direction: 'Descending'}]).setCap(5));
+						tmpQuery.buildReadQuery();
+						Expect(tmpQuery.query.body).to.not.match(/^SELECT `IDAnimal`, `Species`\.`Name` FROM \(\(/);
+					}
+				);
 			}
 		);
 	}

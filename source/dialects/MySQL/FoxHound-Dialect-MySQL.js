@@ -843,6 +843,39 @@ var FoxHoundDialectMySQL = function()
 	};
 
 	/**
+	* Whether a sort column belongs to a table other than the scope. The derived table a branched read
+	* is wrapped in only exposes what the branches selected, so such a column is carried out of each
+	* branch under an alias and the outer ORDER BY names the alias.
+	*
+	* @method: isJoinedSortColumn
+	* @param: {Object} pParameters SQL Query Parameters
+	* @param: {String} pColumn The sort column
+	* @return: {Boolean} Returns true when the column is qualified with another table
+	*/
+	var isJoinedSortColumn = function(pParameters, pColumn)
+	{
+		if ((typeof(pParameters.scope) !== 'string') || (pParameters.scope.indexOf('.') > -1))
+		{
+			return false;
+		}
+		var tmpColumn = String(pColumn).replace(/`/g, '').trim();
+		var tmpDot = tmpColumn.indexOf('.');
+		return (tmpDot > 0) && (tmpColumn.substring(0, tmpDot) !== pParameters.scope.replace(/`/g, ''));
+	};
+
+	/**
+	* The alias a branched read selects its joined sort column at pSortIndex under.
+	*
+	* @method: branchSortAlias
+	* @param: {Number} pSortIndex The column's position in the sort
+	* @return: {String} Returns the alias
+	*/
+	var branchSortAlias = function(pSortIndex)
+	{
+		return 'BranchSort_' + pSortIndex;
+	};
+
+	/**
 	* The sort columns a branched read can actually order by.
 	*
 	* A DISTINCT read projects a narrower set of columns than the table, and the UNION is wrapped in
@@ -868,6 +901,11 @@ var FoxHoundDialectMySQL = function()
 		var tmpSortable = [];
 		for (var i = 0; i < tmpSort.length; i++)
 		{
+			if (isJoinedSortColumn(pParameters, tmpSort[i].Column))
+			{
+				// A projected column of the same name is the scope's, not the joined table's.
+				continue;
+			}
 			var tmpSortColumn = String(tmpSort[i].Column).split('.').pop();
 			for (var j = 0; j < tmpDataElements.length; j++)
 			{
@@ -887,7 +925,10 @@ var FoxHoundDialectMySQL = function()
 	*
 	* The UNION is wrapped in a derived table, so the outer ORDER BY can only name columns the
 	* branches projected. Where the caller sorts by something outside its own field list, the branch
-	* selects it too. A DISTINCT read is left alone -- see generateBranchSort.
+	* selects it too. A column of a joined table is selected under an alias (branchSortAlias) for
+	* generateOuterBranchSort to name; with no field list the branch then selects the scope's columns
+	* plus those aliases, and the outer `scope`.* carries the aliases through to the caller. A DISTINCT
+	* read is left alone -- see generateBranchSort.
 	*
 	* @method: generateBranchDataElements
 	* @param: {Object} pParameters SQL Query Parameters
@@ -896,15 +937,27 @@ var FoxHoundDialectMySQL = function()
 	var generateBranchDataElements = function(pParameters)
 	{
 		var tmpDataElements = pParameters.dataElements;
-		if (!Array.isArray(tmpDataElements) || tmpDataElements.length < 1 || pParameters.distinct)
+		if (pParameters.distinct)
 		{
 			return tmpDataElements;
 		}
 
-		var tmpElements = tmpDataElements.slice();
+		var tmpHasFieldList = Array.isArray(tmpDataElements) && (tmpDataElements.length > 0);
+		var tmpElements = tmpHasFieldList ? tmpDataElements.slice() : [];
+		var tmpJoinedSorts = [];
 		var tmpSort = Array.isArray(pParameters.sort) ? pParameters.sort : [];
 		for (var i = 0; i < tmpSort.length; i++)
 		{
+			if (isJoinedSortColumn(pParameters, tmpSort[i].Column))
+			{
+				tmpJoinedSorts.push([tmpSort[i].Column, branchSortAlias(i)]);
+				continue;
+			}
+			if (!tmpHasFieldList)
+			{
+				// The scope's own columns are all selected already.
+				continue;
+			}
 			var tmpSortColumn = String(tmpSort[i].Column).split('.').pop();
 			var tmpPresent = false;
 			for (var j = 0; j < tmpElements.length; j++)
@@ -929,7 +982,36 @@ var FoxHoundDialectMySQL = function()
 				tmpElements.push(tmpColumn);
 			}
 		}
-		return tmpElements;
+		if (tmpJoinedSorts.length < 1)
+		{
+			return tmpHasFieldList ? tmpElements : tmpDataElements;
+		}
+		if (!tmpHasFieldList)
+		{
+			tmpElements.push(pParameters.scope + '.*');
+		}
+		return tmpElements.concat(tmpJoinedSorts);
+	};
+
+	/**
+	* The outer ORDER BY of a branched read: the branch sort, with each joined-table column replaced by
+	* the alias the branches selected it under (see generateBranchDataElements).
+	*
+	* @method: generateOuterBranchSort
+	* @param: {Object} pParameters SQL Query Parameters
+	* @return: {Array} Returns the sort entries for the outer query
+	*/
+	var generateOuterBranchSort = function(pParameters)
+	{
+		var tmpSort = generateBranchSort(pParameters);
+		if (!Array.isArray(tmpSort) || pParameters.distinct)
+		{
+			return tmpSort;
+		}
+		return tmpSort.map(function(pEntry, pIndex)
+		{
+			return isJoinedSortColumn(pParameters, pEntry.Column) ? Object.assign({}, pEntry, { Column: branchSortAlias(pIndex) }) : pEntry;
+		});
 	};
 
 	/**
@@ -1004,7 +1086,7 @@ var FoxHoundDialectMySQL = function()
 			tmpSelects.push(generateBranchSelect(pParameters, tmpBranches[i], i));
 		}
 
-		var tmpOuterParameters = Object.assign({}, pParameters, { queryBranches: false, sort: generateBranchSort(pParameters) });
+		var tmpOuterParameters = Object.assign({}, pParameters, { queryBranches: false, sort: generateOuterBranchSort(pParameters) });
 		var tmpOptDistinct = pParameters.distinct ? ' DISTINCT' : '';
 
 		return 'SELECT' + tmpOptDistinct + generateFieldList(tmpOuterParameters) +
